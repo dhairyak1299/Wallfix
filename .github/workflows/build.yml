@@ -1,4 +1,4 @@
-       name: Build
+     -  name: Build
         working-directory: wallfix_1/wallfix
         run: gradle build --stacktrace
 
@@ -27,8 +27,8 @@ jobs:
       - name: Build
         run: gradle build --stacktrace
 
-      - name: Upload jar
+        - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
           name: WallFix-jar
-          path: build/libs/*.jar
+          path: wallfix_1/wallfix/build/libs/*.jar

@@ -1,4 +1,6 @@
-name: Build WallFix
+       name: Build
+        working-directory: wallfix_1/wallfix
+        run: gradle build --stacktrace
 
 on:
   workflow_dispatch:

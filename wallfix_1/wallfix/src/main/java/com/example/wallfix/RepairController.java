@@ -9,13 +9,14 @@ import net.minecraft.util.BlockPos;
 import net.minecraft.util.ChatComponentText;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Module: toggle + state machine.
- *  ARMED     - each tick: check the watched row for a new hole, otherwise refresh anchor + snapshot from the aim ray.
- *  REPAIRING - anchor and snapshot are frozen, refill until sealed, out of time, or out of blocks.
- * It never touches movement, rotation or position.
+ *  ARMED     - each tick: establish/keep an anchor (wall row), check it live for any breach.
+ *  REPAIRING - anchor frozen, refill until sealed, out of time, or out of blocks.
+ * Detection is fully live (no snapshot/history) so arming the mod after damage
+ * already exists works exactly the same as arming it before. Never touches
+ * movement, rotation or position.
  */
 public final class RepairController {
     private enum State { DISABLED, ARMED, REPAIRING }
@@ -34,10 +35,9 @@ public final class RepairController {
     public boolean isEnabled() { return state != State.DISABLED; }
     public boolean isRepairing() { return state == State.REPAIRING; }
     private WallAnchor anchor;
-    private Set<Long> baseline;
     private volatile Integer lockedY = null; // null = auto from aim
 
-    public void setLockedY(Integer y) { lockedY = y; if (state == State.ARMED) { anchor = null; baseline = null; } }
+    public void setLockedY(Integer y) { lockedY = y; if (state == State.ARMED) anchor = null; }
     public Integer getLockedY() { return lockedY; }
 
     public RepairController(KeyBinding... toggleKeys) { this.toggleKeys = toggleKeys; }
@@ -56,35 +56,34 @@ public final class RepairController {
     }
 
     private void tickArmed(EntityPlayerSP p, WorldClient w, long now) {
-        if (anchor != null && baseline != null) {
-            Hole h = holes.find(w, anchor, baseline);
-            if (h != null && clock.acceptImpact(now)) {
-                clock.registerImpact(now);
-                attempts.clear();
-                state = State.REPAIRING;
-                tickRepairing(p, w, now); // same tick, zero added latency
-                return;
-            }
-        }
         Integer ly = lockedY;
         if (ly != null) {
             // Locked Y: find the wall ONCE from position+facing, then freeze it.
-            // Never re-derive from a raycast here - aiming through the open hole
+            // Never re-derive from a raycast here - aiming through an open hole
             // would otherwise send the ray past it onto some unrelated surface.
             if (anchor == null) {
                 WallAnchor a = planeLocator.locate(p, w, ly);
-                if (a != null) { anchor = a; baseline = holes.snapshot(w, a); }
+                if (a != null) anchor = a;
                 else chat("WallFix: no obsidian found near Y=" + ly + " in front of you.");
             }
         } else {
             // Auto: track whatever solid wall the player is currently looking at.
             WallAnchor a = impact.detect(p, w);
-            if (a != null) { anchor = a; baseline = holes.snapshot(w, a); }
+            if (a != null) anchor = a;
+        }
+
+        if (anchor == null) return;
+        Hole h = holes.find(w, anchor);
+        if (h != null && clock.acceptImpact(now)) {
+            clock.registerImpact(now);
+            attempts.clear();
+            state = State.REPAIRING;
+            tickRepairing(p, w, now); // same tick, zero added latency
         }
     }
 
     private void tickRepairing(EntityPlayerSP p, WorldClient w, long now) {
-        Hole hole = holes.find(w, anchor, baseline);
+        Hole hole = holes.find(w, anchor);
         if (hole == null) { rearm(); return; }                 // sealed
         if (now > clock.repairDeadline()) { rearm(); return; } // next shot is close, stop interfering
 
@@ -109,11 +108,11 @@ public final class RepairController {
         }
     }
 
-    private void rearm() { state = State.ARMED; anchor = null; baseline = null; attempts.clear(); }
+    private void rearm() { state = State.ARMED; anchor = null; attempts.clear(); }
 
     private void toggle() {
         if (state == State.DISABLED) { rearm(); clock.reset(); chat("WallFix: ON"); }
-        else { state = State.DISABLED; anchor = null; baseline = null; attempts.clear(); chat("WallFix: OFF"); }
+        else { state = State.DISABLED; anchor = null; attempts.clear(); chat("WallFix: OFF"); }
     }
 
     private void chat(String s) { if (mc.thePlayer != null) mc.thePlayer.addChatMessage(new ChatComponentText(s)); }

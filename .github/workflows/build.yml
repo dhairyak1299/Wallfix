@@ -22,9 +22,15 @@ jobs:
         with:
           gradle-version: '2.14.1'
 
-      - name: Build
-        working-directory: wallfix_1/wallfix
-        run: gradle build --stacktrace
+      - name: Build (retries on flaky Forge Maven downloads)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 4
+          retry_wait_seconds: 20
+          command: |
+            cd wallfix_1/wallfix
+            gradle build --stacktrace
 
       - name: Upload jar
         uses: actions/upload-artifact@v4
